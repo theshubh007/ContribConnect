@@ -208,22 +208,25 @@ def ingest_repository(org: str, repo: str, token: str, cursor: str) -> Dict:
     
     if isinstance(prs, list):
         for pr in prs[:30]:  # Limit to 30 PRs
-            pr_number = pr.get('number')
-            if not pr_number:
-                continue
+            try:
+                pr_number = pr.get('number')
+                if not pr_number:
+                    continue
+                    
+                pr_id = f"pr#{org}/{repo}#{pr_number}"
                 
-            pr_id = f"pr#{org}/{repo}#{pr_number}"
-            
-            # Safely get user info
-            user_data = pr.get('user')
-            if not user_data:
-                continue
-            
-            user_login = user_data.get('login')
-            if not user_login:
-                continue
+                # Safely get user info
+                user_data = pr.get('user')
+                if not user_data:
+                    print(f"  ⚠️  PR #{pr_number} has no user data, skipping")
+                    continue
                 
-            user_id = f"user#{user_login}"
+                user_login = user_data.get('login')
+                if not user_login:
+                    print(f"  ⚠️  PR #{pr_number} user has no login, skipping")
+                    continue
+                
+                user_id = f"user#{user_login}"
             
             # Create PR node
             upsert_node(
@@ -249,8 +252,8 @@ def ingest_repository(org: str, repo: str, token: str, cursor: str) -> Dict:
                     'user',
                     {
                         'login': user_login,
-                        'url': pr.get('user', {}).get('html_url'),
-                        'avatarUrl': pr.get('user', {}).get('avatar_url'),
+                        'url': user_data.get('html_url'),
+                        'avatarUrl': user_data.get('avatar_url'),
                         'type': 'contributor'
                     }
                 )
@@ -292,11 +295,16 @@ def ingest_repository(org: str, repo: str, token: str, cursor: str) -> Dict:
                     )
                     
                     stats['files'] += 1
-            
-            stats['prs'] += 1
-            save_to_s3(pr, f"github/{org}/{repo}/prs/{date_path}/pr-{pr_number}.json")
-            
-            time.sleep(0.5)  # Rate limiting
+                
+                stats['prs'] += 1
+                save_to_s3(pr, f"github/{org}/{repo}/prs/{date_path}/pr-{pr_number}.json")
+                
+                time.sleep(0.5)  # Rate limiting
+            except Exception as e:
+                print(f"  ❌ Error processing PR #{pr.get('number', 'unknown')}: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
     
     # 3. FETCH ISSUES (separate from PRs)
     print(f"Fetching issues for {org}/{repo}...")
@@ -349,8 +357,8 @@ def ingest_repository(org: str, repo: str, token: str, cursor: str) -> Dict:
                     'user',
                     {
                         'login': user_login,
-                        'url': issue.get('user', {}).get('html_url'),
-                        'avatarUrl': issue.get('user', {}).get('avatar_url'),
+                        'url': user_data.get('html_url'),
+                        'avatarUrl': user_data.get('avatar_url'),
                         'type': 'contributor'
                     }
                 )
