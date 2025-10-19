@@ -227,79 +227,79 @@ def ingest_repository(org: str, repo: str, token: str, cursor: str) -> Dict:
                     continue
                 
                 user_id = f"user#{user_login}"
-            
-            # Create PR node
-            upsert_node(
-                pr_id,
-                'pull_request',
-                {
-                    'number': pr_number,
-                    'title': pr.get('title'),
-                    'body': pr.get('body', '')[:500],
-                    'state': pr.get('state'),
-                    'merged': pr.get('merged', False),
-                    'createdAt': pr.get('created_at'),
-                    'url': pr.get('html_url'),
-                    'additions': pr.get('additions', 0),
-                    'deletions': pr.get('deletions', 0)
-                }
-            )
-            
-            # Create user node if not exists
-            if user_login:
+                
+                # Create PR node
                 upsert_node(
-                    user_id,
-                    'user',
+                    pr_id,
+                    'pull_request',
                     {
-                        'login': user_login,
-                        'url': user_data.get('html_url'),
-                        'avatarUrl': user_data.get('avatar_url'),
-                        'type': 'contributor'
+                        'number': pr_number,
+                        'title': pr.get('title'),
+                        'body': pr.get('body', '')[:500],
+                        'state': pr.get('state'),
+                        'merged': pr.get('merged', False),
+                        'createdAt': pr.get('created_at'),
+                        'url': pr.get('html_url'),
+                        'additions': pr.get('additions', 0),
+                        'deletions': pr.get('deletions', 0)
                     }
                 )
                 
-                # Create AUTHORED edge
-                upsert_edge(user_id, pr_id, 'AUTHORED', {'createdAt': pr.get('created_at')})
-            
-            # Create IN_REPO edge
-            upsert_edge(pr_id, repo_id, 'IN_REPO')
-            
-            # Fetch PR files to create TOUCHES edges
-            files_url = f"https://api.github.com/repos/{org}/{repo}/pulls/{pr_number}/files"
-            files = github_request(files_url, token, {'per_page': 20})
-            
-            if isinstance(files, list):
-                for file_data in files[:10]:  # Limit to 10 files per PR
-                    filename = file_data.get('filename')
-                    file_id = f"file#{org}/{repo}#{filename}"
-                    
-                    # Create file node
+                # Create user node if not exists
+                if user_login:
                     upsert_node(
-                        file_id,
-                        'file',
+                        user_id,
+                        'user',
                         {
-                            'path': filename,
-                            'directory': '/'.join(filename.split('/')[:-1]) if '/' in filename else ''
+                            'login': user_login,
+                            'url': user_data.get('html_url'),
+                            'avatarUrl': user_data.get('avatar_url'),
+                            'type': 'contributor'
                         }
                     )
                     
-                    # Create TOUCHES edge
-                    upsert_edge(
-                        pr_id,
-                        file_id,
-                        'TOUCHES',
-                        {
-                            'additions': file_data.get('additions', 0),
-                            'deletions': file_data.get('deletions', 0)
-                        }
-                    )
+                    # Create AUTHORED edge
+                    upsert_edge(user_id, pr_id, 'AUTHORED', {'createdAt': pr.get('created_at')})
+                
+                # Create IN_REPO edge
+                upsert_edge(pr_id, repo_id, 'IN_REPO')
+                
+                # Fetch PR files to create TOUCHES edges
+                files_url = f"https://api.github.com/repos/{org}/{repo}/pulls/{pr_number}/files"
+                files = github_request(files_url, token, {'per_page': 20})
+                
+                if isinstance(files, list):
+                    for file_data in files[:10]:  # Limit to 10 files per PR
+                        filename = file_data.get('filename')
+                        file_id = f"file#{org}/{repo}#{filename}"
+                        
+                        # Create file node
+                        upsert_node(
+                            file_id,
+                            'file',
+                            {
+                                'path': filename,
+                                'directory': '/'.join(filename.split('/')[:-1]) if '/' in filename else ''
+                            }
+                        )
+                        
+                        # Create TOUCHES edge
+                        upsert_edge(
+                            pr_id,
+                            file_id,
+                            'TOUCHES',
+                            {
+                                'additions': file_data.get('additions', 0),
+                                'deletions': file_data.get('deletions', 0)
+                            }
+                        )
+                        
+                        stats['files'] += 1
                     
-                    stats['files'] += 1
-                
-                stats['prs'] += 1
-                save_to_s3(pr, f"github/{org}/{repo}/prs/{date_path}/pr-{pr_number}.json")
-                
-                time.sleep(0.5)  # Rate limiting
+                    stats['prs'] += 1
+                    save_to_s3(pr, f"github/{org}/{repo}/prs/{date_path}/pr-{pr_number}.json")
+                    
+                    time.sleep(0.5)  # Rate limiting
             except Exception as e:
                 print(f"  ❌ Error processing PR #{pr.get('number', 'unknown')}: {e}")
                 import traceback
