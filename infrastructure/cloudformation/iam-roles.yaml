@@ -1,0 +1,323 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ContribConnect - IAM Roles for Lambda functions with least-privilege access'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+    Description: Environment name
+  
+  NodesTableName:
+    Type: String
+    Description: Name of the Nodes DynamoDB table
+  
+  EdgesTableName:
+    Type: String
+    Description: Name of the Edges DynamoDB table
+  
+  ReposTableName:
+    Type: String
+    Description: Name of the Repos DynamoDB table
+  
+  AgentSessionsTableName:
+    Type: String
+    Description: Name of the Agent Sessions DynamoDB table
+  
+  RawDataBucketName:
+    Type: String
+    Description: Name of the Raw Data S3 bucket
+  
+  KnowledgeBaseDocsBucketName:
+    Type: String
+    Description: Name of the Knowledge Base Docs S3 bucket
+
+Resources:
+  # Lambda Execution Role for Ingestion Function
+  IngestLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'cc-ingest-lambda-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: IngestLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # DynamoDB access for all tables
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${NodesTableName}'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EdgesTableName}'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ReposTableName}'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${NodesTableName}/index/*'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EdgesTableName}/index/*'
+              # S3 access for raw data and KB docs
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${RawDataBucketName}'
+                  - !Sub 'arn:aws:s3:::${RawDataBucketName}/*'
+                  - !Sub 'arn:aws:s3:::${KnowledgeBaseDocsBucketName}'
+                  - !Sub 'arn:aws:s3:::${KnowledgeBaseDocsBucketName}/*'
+              # Secrets Manager access for GitHub token
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:cc-github-token-*'
+      Tags:
+        - Key: Project
+          Value: ContribConnect
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Lambda Execution Role for Graph Tool
+  GraphToolLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'cc-graph-tool-lambda-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: GraphToolLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # DynamoDB read access for graph queries
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:BatchGetItem
+                Resource:
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${NodesTableName}'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EdgesTableName}'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${NodesTableName}/index/*'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EdgesTableName}/index/*'
+      Tags:
+        - Key: Project
+          Value: ContribConnect
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Lambda Execution Role for KB Tool
+  KBToolLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'cc-kb-tool-lambda-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: KBToolLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Bedrock Knowledge Base access
+              - Effect: Allow
+                Action:
+                  - bedrock:Retrieve
+                  - bedrock:RetrieveAndGenerate
+                Resource:
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*'
+      Tags:
+        - Key: Project
+          Value: ContribConnect
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Lambda Execution Role for Q Business Tool
+  QBizToolLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'cc-qbiz-tool-lambda-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: QBizToolLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Q Business access
+              - Effect: Allow
+                Action:
+                  - qbusiness:Chat
+                  - qbusiness:ChatSync
+                Resource:
+                  - !Sub 'arn:aws:qbusiness:${AWS::Region}:${AWS::AccountId}:application/*'
+      Tags:
+        - Key: Project
+          Value: ContribConnect
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Lambda Execution Role for GitHub Tool
+  GitHubToolLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'cc-github-tool-lambda-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: GitHubToolLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Secrets Manager access for GitHub token
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:cc-github-token-*'
+      Tags:
+        - Key: Project
+          Value: ContribConnect
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Lambda Execution Role for Agent Proxy
+  AgentProxyLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'cc-agent-proxy-lambda-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: AgentProxyLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Bedrock access for Converse API and Guardrails (all regions for inference profiles)
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                  - bedrock:Converse
+                  - bedrock:ConverseStream
+                  - bedrock:ApplyGuardrail
+                Resource:
+                  - 'arn:aws:bedrock:*::foundation-model/amazon.nova-*'
+                  - 'arn:aws:bedrock:*::foundation-model/us.amazon.nova-*'
+                  - !Sub 'arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/*'
+              # Lambda invoke for tool functions
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:cc-github-tool-${Environment}'
+                  - !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:cc-graph-tool-${Environment}'
+                  - !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:cc-kb-tool-${Environment}'
+                  - !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:cc-qbiz-tool-${Environment}'
+              # DynamoDB access for session management
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:UpdateItem
+                Resource:
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AgentSessionsTableName}'
+              # Secrets Manager access for API key
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:cc-api-key-*'
+      Tags:
+        - Key: Project
+          Value: ContribConnect
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+  IngestLambdaRoleArn:
+    Description: ARN of the Ingest Lambda execution role
+    Value: !GetAtt IngestLambdaRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-IngestLambdaRoleArn'
+
+  GraphToolLambdaRoleArn:
+    Description: ARN of the Graph Tool Lambda execution role
+    Value: !GetAtt GraphToolLambdaRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-GraphToolLambdaRoleArn'
+
+  KBToolLambdaRoleArn:
+    Description: ARN of the KB Tool Lambda execution role
+    Value: !GetAtt KBToolLambdaRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-KBToolLambdaRoleArn'
+
+  QBizToolLambdaRoleArn:
+    Description: ARN of the Q Business Tool Lambda execution role
+    Value: !GetAtt QBizToolLambdaRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-QBizToolLambdaRoleArn'
+
+  GitHubToolLambdaRoleArn:
+    Description: ARN of the GitHub Tool Lambda execution role
+    Value: !GetAtt GitHubToolLambdaRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-GitHubToolLambdaRoleArn'
+
+  AgentProxyLambdaRoleArn:
+    Description: ARN of the Agent Proxy Lambda execution role
+    Value: !GetAtt AgentProxyLambdaRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-AgentProxyLambdaRoleArn'

@@ -1,0 +1,75 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ContribConnect - EventBridge Scheduler for Data Ingestion'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Environment name
+  
+  ScheduleExpression:
+    Type: String
+    Default: 'rate(6 hours)'
+    Description: Schedule expression for ingestion (e.g., rate(6 hours) or cron(0 */6 * * ? *))
+
+Resources:
+  # EventBridge Scheduler Role
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'cc-scheduler-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:cc-ingest-${Environment}'
+
+  # EventBridge Schedule for Ingestion
+  IngestionSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub 'cc-ingestion-schedule-${Environment}'
+      Description: 'Scheduled data ingestion from GitHub'
+      ScheduleExpression: !Ref ScheduleExpression
+      FlexibleTimeWindow:
+        Mode: 'OFF'
+      State: ENABLED
+      Target:
+        Arn: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:cc-ingest-${Environment}'
+        RoleArn: !GetAtt SchedulerRole.Arn
+        RetryPolicy:
+          MaximumRetryAttempts: 2
+
+Outputs:
+  ScheduleName:
+    Description: EventBridge Schedule Name
+    Value: !Ref IngestionSchedule
+    Export:
+      Name: !Sub '${AWS::StackName}-ScheduleName'
+  
+  ScheduleArn:
+    Description: EventBridge Schedule ARN
+    Value: !GetAtt IngestionSchedule.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ScheduleArn'
+  
+  SchedulerRoleArn:
+    Description: Scheduler IAM Role ARN
+    Value: !GetAtt SchedulerRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-SchedulerRoleArn'

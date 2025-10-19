@@ -1,0 +1,300 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ContribConnect - Bedrock Knowledge Base and Guardrails configuration'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+    Description: Environment name
+  
+  KnowledgeBaseDocsBucketName:
+    Type: String
+    Description: Name of the S3 bucket containing Knowledge Base documents
+
+Resources:
+  # IAM Role for Bedrock Knowledge Base
+  BedrockKnowledgeBaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'cc-bedrock-kb-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*'
+      Policies:
+        - PolicyName: BedrockKnowledgeBaseS3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${KnowledgeBaseDocsBucketName}'
+                  - !Sub 'arn:aws:s3:::${KnowledgeBaseDocsBucketName}/*'
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v1'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v2:0'
+      Tags:
+        - Key: Project
+          Value: ContribConnect
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Bedrock Knowledge Base
+  ContribConnectKnowledgeBase:
+    Type: AWS::Bedrock::KnowledgeBase
+    Properties:
+      Name: !Sub 'cc-knowledge-base-${Environment}'
+      Description: 'ContribConnect Knowledge Base for repository documentation and code context'
+      RoleArn: !GetAtt BedrockKnowledgeBaseRole.Arn
+      KnowledgeBaseConfiguration:
+        Type: VECTOR
+        VectorKnowledgeBaseConfiguration:
+          EmbeddingModelArn: !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v1'
+      StorageConfiguration:
+        Type: OPENSEARCH_SERVERLESS
+        OpensearchServerlessConfiguration:
+          CollectionArn: !GetAtt KnowledgeBaseVectorCollection.Arn
+          VectorIndexName: 'cc-vector-index'
+          FieldMapping:
+            VectorField: 'embedding'
+            TextField: 'text'
+            MetadataField: 'metadata'
+      Tags:
+        Project: ContribConnect
+        Environment: !Ref Environment
+
+  # OpenSearch Serverless Collection for Knowledge Base
+  KnowledgeBaseVectorCollection:
+    Type: AWS::OpenSearchServerless::Collection
+    Properties:
+      Name: !Sub 'cc-kb-vectors-${Environment}'
+      Type: VECTORSEARCH
+      Description: 'Vector collection for ContribConnect Knowledge Base'
+      Tags:
+        - Key: Project
+          Value: ContribConnect
+        - Key: Environment
+          Value: !Ref Environment
+    DependsOn:
+      - VectorCollectionEncryptionPolicy
+      - VectorCollectionNetworkPolicy
+      - VectorCollectionDataAccessPolicy
+
+  # Encryption Policy for OpenSearch Serverless
+  VectorCollectionEncryptionPolicy:
+    Type: AWS::OpenSearchServerless::SecurityPolicy
+    Properties:
+      Name: !Sub 'cc-kb-encryption-${Environment}'
+      Type: encryption
+      Policy: !Sub |
+        {
+          "Rules": [
+            {
+              "ResourceType": "collection",
+              "Resource": ["collection/cc-kb-vectors-${Environment}"]
+            }
+          ],
+          "AWSOwnedKey": true
+        }
+
+  # Network Policy for OpenSearch Serverless
+  VectorCollectionNetworkPolicy:
+    Type: AWS::OpenSearchServerless::SecurityPolicy
+    Properties:
+      Name: !Sub 'cc-kb-network-${Environment}'
+      Type: network
+      Policy: !Sub |
+        [
+          {
+            "Rules": [
+              {
+                "ResourceType": "collection",
+                "Resource": ["collection/cc-kb-vectors-${Environment}"]
+              },
+              {
+                "ResourceType": "dashboard",
+                "Resource": ["collection/cc-kb-vectors-${Environment}"]
+              }
+            ],
+            "AllowFromPublic": true
+          }
+        ]
+
+  # Data Access Policy for OpenSearch Serverless
+  VectorCollectionDataAccessPolicy:
+    Type: AWS::OpenSearchServerless::AccessPolicy
+    Properties:
+      Name: !Sub 'cc-kb-data-access-${Environment}'
+      Type: data
+      Policy: !Sub |
+        [
+          {
+            "Rules": [
+              {
+                "ResourceType": "collection",
+                "Resource": ["collection/cc-kb-vectors-${Environment}"],
+                "Permission": [
+                  "aoss:CreateCollectionItems",
+                  "aoss:UpdateCollectionItems",
+                  "aoss:DescribeCollectionItems"
+                ]
+              },
+              {
+                "ResourceType": "index",
+                "Resource": ["index/cc-kb-vectors-${Environment}/*"],
+                "Permission": [
+                  "aoss:CreateIndex",
+                  "aoss:DescribeIndex",
+                  "aoss:ReadDocument",
+                  "aoss:WriteDocument",
+                  "aoss:UpdateIndex",
+                  "aoss:DeleteIndex"
+                ]
+              }
+            ],
+            "Principal": [
+              "${BedrockKnowledgeBaseRole.Arn}",
+              "arn:aws:iam::${AWS::AccountId}:role/cc-kb-tool-lambda-role-${Environment}"
+            ]
+          }
+        ]
+
+  # Bedrock Guardrail for Content Filtering
+  ContribConnectGuardrail:
+    Type: AWS::Bedrock::Guardrail
+    Properties:
+      Name: !Sub 'cc-guardrail-${Environment}'
+      Description: 'Content filtering and safety guardrail for ContribConnect agent'
+      BlockedInputMessaging: 'Sorry, I cannot process this request as it may contain inappropriate content.'
+      BlockedOutputsMessaging: 'I apologize, but I cannot provide that response as it may contain inappropriate content.'
+      ContentPolicyConfig:
+        FiltersConfig:
+          - Type: SEXUAL
+            InputStrength: HIGH
+            OutputStrength: HIGH
+          - Type: VIOLENCE
+            InputStrength: HIGH
+            OutputStrength: HIGH
+          - Type: HATE
+            InputStrength: HIGH
+            OutputStrength: HIGH
+          - Type: INSULTS
+            InputStrength: MEDIUM
+            OutputStrength: MEDIUM
+          - Type: MISCONDUCT
+            InputStrength: MEDIUM
+            OutputStrength: MEDIUM
+          - Type: PROMPT_ATTACK
+            InputStrength: HIGH
+            OutputStrength: NONE
+      TopicPolicyConfig:
+        TopicsConfig:
+          - Name: 'PoliticalContent'
+            Definition: 'Political discussions, elections, or partisan content'
+            Examples:
+              - 'Who should I vote for?'
+              - 'What is your political opinion?'
+            Type: DENY
+          - Name: 'FinancialAdvice'
+            Definition: 'Investment advice or financial recommendations'
+            Examples:
+              - 'Should I invest in this stock?'
+              - 'What cryptocurrency should I buy?'
+            Type: DENY
+      WordPolicyConfig:
+        WordsConfig:
+          - Text: 'password'
+        ManagedWordListsConfig:
+          - Type: PROFANITY
+      SensitiveInformationPolicyConfig:
+        PiiEntitiesConfig:
+          - Type: EMAIL
+            Action: ANONYMIZE
+          - Type: PHONE
+            Action: ANONYMIZE
+          - Type: NAME
+            Action: ANONYMIZE
+          - Type: ADDRESS
+            Action: ANONYMIZE
+          - Type: CREDIT_DEBIT_CARD_NUMBER
+            Action: BLOCK
+          - Type: US_SOCIAL_SECURITY_NUMBER
+            Action: BLOCK
+      Tags:
+        - Key: Project
+          Value: ContribConnect
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Bedrock Guardrail Version
+  GuardrailVersion:
+    Type: AWS::Bedrock::GuardrailVersion
+    Properties:
+      GuardrailIdentifier: !GetAtt ContribConnectGuardrail.GuardrailId
+      Description: !Sub 'Version 1 - Initial guardrail configuration for ${Environment}'
+
+Outputs:
+  KnowledgeBaseId:
+    Description: ID of the Bedrock Knowledge Base
+    Value: !GetAtt ContribConnectKnowledgeBase.KnowledgeBaseId
+    Export:
+      Name: !Sub '${AWS::StackName}-KnowledgeBaseId'
+
+  KnowledgeBaseArn:
+    Description: ARN of the Bedrock Knowledge Base
+    Value: !GetAtt ContribConnectKnowledgeBase.KnowledgeBaseArn
+    Export:
+      Name: !Sub '${AWS::StackName}-KnowledgeBaseArn'
+
+  VectorCollectionArn:
+    Description: ARN of the OpenSearch Serverless vector collection
+    Value: !GetAtt KnowledgeBaseVectorCollection.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-VectorCollectionArn'
+
+  VectorCollectionEndpoint:
+    Description: Endpoint of the OpenSearch Serverless vector collection
+    Value: !GetAtt KnowledgeBaseVectorCollection.CollectionEndpoint
+    Export:
+      Name: !Sub '${AWS::StackName}-VectorCollectionEndpoint'
+
+  GuardrailId:
+    Description: ID of the Bedrock Guardrail
+    Value: !GetAtt ContribConnectGuardrail.GuardrailId
+    Export:
+      Name: !Sub '${AWS::StackName}-GuardrailId'
+
+  GuardrailArn:
+    Description: ARN of the Bedrock Guardrail
+    Value: !GetAtt ContribConnectGuardrail.GuardrailArn
+    Export:
+      Name: !Sub '${AWS::StackName}-GuardrailArn'
+
+  GuardrailVersion:
+    Description: Version of the Bedrock Guardrail
+    Value: !GetAtt GuardrailVersion.Version
+    Export:
+      Name: !Sub '${AWS::StackName}-GuardrailVersion'
+
+  BedrockKnowledgeBaseRoleArn:
+    Description: ARN of the Bedrock Knowledge Base IAM role
+    Value: !GetAtt BedrockKnowledgeBaseRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-BedrockKnowledgeBaseRoleArn'

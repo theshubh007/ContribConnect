@@ -1,0 +1,3 @@
+﻿{
+  "body": "{\"action\":\"find_reviewers\",\"params\":{\"labels\":[\"bug\"],\"repo\":\"facebook/react\"}}"
+}

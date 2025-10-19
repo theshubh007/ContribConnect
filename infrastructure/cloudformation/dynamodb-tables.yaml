@@ -1,0 +1,164 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ContribConnect - DynamoDB Tables for graph storage, sessions, and configuration'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+    Description: Environment name
+
+Resources:
+  # Graph Nodes Table
+  NodesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'cc-nodes-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: nodeId
+          AttributeType: S
+        - AttributeName: nodeType
+          AttributeType: S
+      KeySchema:
+        - AttributeName: nodeId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: NodeTypeIndex
+          KeySchema:
+            - AttributeName: nodeType
+              KeyType: HASH
+            - AttributeName: nodeId
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Project
+          Value: ContribConnect
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Graph Edges Table (Adjacency List Pattern)
+  EdgesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'cc-edges-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: fromId
+          AttributeType: S
+        - AttributeName: toIdEdgeType
+          AttributeType: S
+        - AttributeName: toId
+          AttributeType: S
+        - AttributeName: fromIdEdgeType
+          AttributeType: S
+      KeySchema:
+        - AttributeName: fromId
+          KeyType: HASH
+        - AttributeName: toIdEdgeType
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: ReverseEdgeIndex
+          KeySchema:
+            - AttributeName: toId
+              KeyType: HASH
+            - AttributeName: fromIdEdgeType
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Project
+          Value: ContribConnect
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Repository Configuration Table
+  ReposTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'cc-repos-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: org
+          AttributeType: S
+        - AttributeName: repo
+          AttributeType: S
+      KeySchema:
+        - AttributeName: org
+          KeyType: HASH
+        - AttributeName: repo
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Project
+          Value: ContribConnect
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Agent Sessions Table
+  AgentSessionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'cc-agent-sessions-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: sessionId
+          AttributeType: S
+        - AttributeName: ts
+          AttributeType: S
+      KeySchema:
+        - AttributeName: sessionId
+          KeyType: HASH
+        - AttributeName: ts
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Project
+          Value: ContribConnect
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+  NodesTableName:
+    Description: Name of the Nodes table
+    Value: !Ref NodesTable
+    Export:
+      Name: !Sub '${AWS::StackName}-NodesTable'
+
+  EdgesTableName:
+    Description: Name of the Edges table
+    Value: !Ref EdgesTable
+    Export:
+      Name: !Sub '${AWS::StackName}-EdgesTable'
+
+  ReposTableName:
+    Description: Name of the Repos table
+    Value: !Ref ReposTable
+    Export:
+      Name: !Sub '${AWS::StackName}-ReposTable'
+
+  AgentSessionsTableName:
+    Description: Name of the Agent Sessions table
+    Value: !Ref AgentSessionsTable
+    Export:
+      Name: !Sub '${AWS::StackName}-AgentSessionsTable'

@@ -1,0 +1,101 @@
+# Deploy Ingestion Lambda Function
+param(
+    [string]$Environment = "dev",
+    [string]$AwsRegion = "us-east-1",
+    [string]$AwsProfile = "default"
+)
+
+$ErrorActionPreference = "Stop"
+
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "Deploy Ingestion Lambda" -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
+
+# Get AWS Account ID
+$AwsAccountId = aws sts get-caller-identity --profile $AwsProfile --query Account --output text
+
+# Get table names and bucket from CloudFormation
+Write-Host "Retrieving resource names..."
+$NodesTable = aws cloudformation describe-stacks --stack-name "cc-dynamodb-$Environment" --region $AwsRegion --query "Stacks[0].Outputs[?OutputKey=='NodesTableName'].OutputValue" --output text
+$EdgesTable = aws cloudformation describe-stacks --stack-name "cc-dynamodb-$Environment" --region $AwsRegion --query "Stacks[0].Outputs[?OutputKey=='EdgesTableName'].OutputValue" --output text
+$ReposTable = aws cloudformation describe-stacks --stack-name "cc-dynamodb-$Environment" --region $AwsRegion --query "Stacks[0].Outputs[?OutputKey=='ReposTableName'].OutputValue" --output text
+$RawBucket = aws cloudformation describe-stacks --stack-name "cc-s3-$Environment" --region $AwsRegion --query "Stacks[0].Outputs[?OutputKey=='RawDataBucketName'].OutputValue" --output text
+$RoleArn = aws cloudformation describe-stacks --stack-name "cc-iam-$Environment" --region $AwsRegion --query "Stacks[0].Outputs[?OutputKey=='IngestLambdaRoleArn'].OutputValue" --output text
+
+Write-Host "Resources:"
+Write-Host "  Nodes Table: $NodesTable"
+Write-Host "  Edges Table: $EdgesTable"
+Write-Host "  Repos Table: $ReposTable"
+Write-Host "  Raw Bucket: $RawBucket"
+Write-Host "  Role ARN: $RoleArn"
+
+# Create deployment package
+Write-Host ""
+Write-Host "Creating deployment package..." -ForegroundColor Yellow
+
+$TempDir = "lambda/ingest/.package"
+if (Test-Path $TempDir) {
+    Remove-Item $TempDir -Recurse -Force
+}
+New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
+
+# Install dependencies
+Write-Host "Installing dependencies..."
+pip install -r lambda/ingest/requirements.txt -t $TempDir --quiet
+
+# Copy Lambda function
+Copy-Item lambda/ingest/lambda_function.py $TempDir/
+
+# Create ZIP
+$ZipFile = "lambda/ingest/function.zip"
+if (Test-Path $ZipFile) {
+    Remove-Item $ZipFile -Force
+}
+
+Write-Host "Creating ZIP package..."
+Compress-Archive -Path "$TempDir/*" -DestinationPath $ZipFile -Force
+
+# Clean up temp directory
+Remove-Item $TempDir -Recurse -Force
+
+Write-Host "Package created: $ZipFile" -ForegroundColor Green
+
+# Create or update Lambda function
+$FunctionName = "cc-ingest-$Environment"
+
+Write-Host ""
+Write-Host "Checking if function exists..."
+$ErrorActionPreference = "Continue"
+$FunctionCheck = aws lambda get-function --function-name $FunctionName --region $AwsRegion --profile $AwsProfile 2>&1
+$FunctionExists = $LASTEXITCODE -eq 0
+$ErrorActionPreference = "Stop"
+
+if ($FunctionExists) {
+    Write-Host "Updating existing function..." -ForegroundColor Yellow
+    aws lambda update-function-code --function-name $FunctionName --zip-file "fileb://$ZipFile" --region $AwsRegion --profile $AwsProfile
+    
+    Start-Sleep -Seconds 2
+    
+    # Update configuration
+    aws lambda update-function-configuration --function-name $FunctionName --environment "Variables={NODES_TABLE=$NodesTable,EDGES_TABLE=$EdgesTable,REPOS_TABLE=$ReposTable,RAW_BUCKET=$RawBucket}" --timeout 300 --memory-size 512 --region $AwsRegion --profile $AwsProfile
+    
+    Write-Host "Function updated successfully" -ForegroundColor Green
+} else {
+    Write-Host "Creating new function..." -ForegroundColor Yellow
+    aws lambda create-function --function-name $FunctionName --runtime python3.13 --role $RoleArn --handler lambda_function.lambda_handler --zip-file "fileb://$ZipFile" --environment "Variables={NODES_TABLE=$NodesTable,EDGES_TABLE=$EdgesTable,REPOS_TABLE=$ReposTable,RAW_BUCKET=$RawBucket}" --timeout 300 --memory-size 512 --region $AwsRegion --profile $AwsProfile
+    
+    Write-Host "Function created successfully" -ForegroundColor Green
+}
+
+Write-Host ""
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "Deployment Complete!" -ForegroundColor Green
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Function Name: $FunctionName"
+Write-Host ""
+Write-Host "To test the function, run:"
+Write-Host "aws lambda invoke --function-name $FunctionName --region $AwsRegion response.json"
+Write-Host ""
+Write-Host "To view logs:"
+Write-Host "aws logs tail /aws/lambda/$FunctionName --follow --region $AwsRegion"
