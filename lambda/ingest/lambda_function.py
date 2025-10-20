@@ -232,28 +232,43 @@ def upsert_edge(from_id: str, to_id: str, edge_type: str, properties: Optional[D
 
 def get_last_processed_pr(org: str, repo: str) -> int:
     """Get the last processed PR number from DynamoDB checkpoint"""
+    print(f"🔍 DEBUG: get_last_processed_pr called for {org}/{repo}")
     try:
+        print(f"🔍 DEBUG: Querying repos_table with key: org={org}, repo={repo}")
         response = repos_table.get_item(Key={'org': org, 'repo': repo})
+        print(f"🔍 DEBUG: get_item response: {response}")
         if 'Item' in response:
-            return response['Item'].get('lastProcessedPR', 0)
+            last_pr = response['Item'].get('lastProcessedPR', 0)
+            print(f"🔍 DEBUG: Found lastProcessedPR = {last_pr}")
+            return last_pr
+        else:
+            print(f"🔍 DEBUG: No item found for {org}/{repo}")
     except Exception as e:
-        print(f"Error getting checkpoint: {e}")
+        print(f"❌ ERROR getting checkpoint: {e}")
+        import traceback
+        traceback.print_exc()
+    print(f"🔍 DEBUG: Returning 0 (no checkpoint)")
     return 0
 
 
 def update_checkpoint(org: str, repo: str, pr_number: int):
     """Update the checkpoint with the last processed PR"""
     try:
-        repos_table.update_item(
+        print(f"DEBUG: Updating checkpoint for {org}/{repo} to PR #{pr_number}")
+        response = repos_table.update_item(
             Key={'org': org, 'repo': repo},
             UpdateExpression='SET lastProcessedPR = :pr, lastCheckpointAt = :now',
             ExpressionAttributeValues={
                 ':pr': pr_number,
                 ':now': datetime.now(timezone.utc).isoformat()
-            }
+            },
+            ReturnValues='ALL_NEW'
         )
+        print(f"DEBUG: Checkpoint updated successfully: {response.get('Attributes', {}).get('lastProcessedPR')}")
     except Exception as e:
         print(f"Error updating checkpoint: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def scrape_pull_requests_comprehensive(org: str, repo: str, token: str, repo_id: str) -> Dict:
@@ -271,7 +286,10 @@ def scrape_pull_requests_comprehensive(org: str, repo: str, token: str, repo_id:
     # Get last checkpoint
     last_processed_pr = get_last_processed_pr(org, repo)
     if last_processed_pr > 0:
-        print(f"📍 Resuming from PR #{last_processed_pr}")
+        print(f"📍 Resuming from checkpoint: PR #{last_processed_pr}")
+        print(f"   Will skip PRs >= #{last_processed_pr} and continue from PR #{last_processed_pr - 1}")
+    else:
+        print(f"📍 No checkpoint found - starting from newest PR")
     
     stats = {
         'prs_total': 0,
@@ -282,7 +300,8 @@ def scrape_pull_requests_comprehensive(org: str, repo: str, token: str, repo_id:
         'reviews': 0,
         'files': 0,
         'api_calls': 0,
-        'errors': []
+        'errors': [],
+        'last_pr_processed': 0
     }
     
     # Check initial rate limit
@@ -323,7 +342,8 @@ def scrape_pull_requests_comprehensive(org: str, repo: str, token: str, repo_id:
                 continue
             
             # Skip if already processed (resume logic)
-            if pr_number <= last_processed_pr:
+            # PRs are in descending order (newest first), so skip if pr_number >= last_processed_pr
+            if last_processed_pr > 0 and pr_number >= last_processed_pr:
                 stats['prs_skipped'] += 1
                 if stats['prs_skipped'] % 100 == 0:
                     print(f"  Skipped {stats['prs_skipped']} already-processed PRs...")
@@ -441,6 +461,7 @@ def scrape_pull_requests_comprehensive(org: str, repo: str, token: str, repo_id:
                         stats['files'] += 1
             
             stats['prs_processed'] += 1
+            stats['last_pr_processed'] = pr_number  # Track the lowest PR number processed
             
             # Save checkpoint every 10 PRs
             if stats['prs_processed'] % 10 == 0:
@@ -456,8 +477,8 @@ def scrape_pull_requests_comprehensive(org: str, repo: str, token: str, repo_id:
             continue
     
     # Save final checkpoint
-    if stats['prs_processed'] > 0:
-        last_pr = all_prs[0].get('number', 0) if all_prs else 0
+    if stats['prs_processed'] > 0 and 'last_pr_processed' in stats:
+        last_pr = stats['last_pr_processed']
         update_checkpoint(org, repo, last_pr)
         print(f"\n💾 Final checkpoint saved at PR #{last_pr}")
     
