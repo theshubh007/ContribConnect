@@ -2,38 +2,66 @@ import { useEffect, useRef, useState } from 'react'
 import * as d3 from 'd3'
 
 const API_URL = 'https://n46ncnxcm8.execute-api.us-east-1.amazonaws.com/api/agent/chat'
+const GRAPH_API_URL = 'https://qzymlko2sb.execute-api.us-east-1.amazonaws.com/dev/graph'
 
 function ContributorGraph({ repository = 'RooCodeInc/Roo-Code' }) {
   const svgRef = useRef()
   const [graphData, setGraphData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [sessionId] = useState(() => `graph-${Date.now()}`)
-  const [viewMode, setViewMode] = useState('hierarchy') // 'hierarchy' or 'network'
+  const [viewMode, setViewMode] = useState('network') // 'hierarchy' or 'network'
   const [stats, setStats] = useState({ repos: 0, contributors: 0, date: '' })
   const [selectedContributor, setSelectedContributor] = useState(null)
 
   const fetchGraphData = async () => {
     setLoading(true)
     try {
-      const response = await fetch(API_URL, {
+      // Call Graph API directly (no AI agent needed!)
+      const response = await fetch(GRAPH_API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: `Find all expert reviewers and contributors for ${repository}`,
-          sessionId: sessionId
+          action: 'get_top_contributors',
+          params: {
+            repo: repository,
+            limit: 300  // Get all contributors
+          }
         })
       })
 
       const data = await response.json()
+      console.log('Graph API response:', data)
 
-      // Parse response to extract contributor data
-      // For demo, create mock data structure
-      const mockData = generateMockGraphData(repository)
-      setGraphData(mockData)
+      // Direct API returns structured JSON - no parsing needed!
+      let contributors = null
+
+      if (data && data.contributors && Array.isArray(data.contributors)) {
+        contributors = data.contributors
+        console.log(`✓ Loaded ${contributors.length} contributors from Graph API`)
+      }
+
+      if (contributors && contributors.length > 0) {
+        console.log(`✓ Successfully loaded ${contributors.length} contributors`)
+        // Convert real data to graph format
+        const graphData = convertToGraphData(contributors, repository)
+        setGraphData(graphData)
+        setStats({
+          repos: 1,
+          contributors: contributors.length,
+          date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+        })
+      } else {
+        // Fallback to mock data if no real data
+        console.log('✗ No contributors found in API response, using mock data')
+        console.log('Full response keys:', Object.keys(data))
+        const mockData = generateMockGraphData(repository)
+        setGraphData(mockData)
+      }
     } catch (error) {
       console.error('Error fetching graph data:', error)
       // Use mock data on error
-      setGraphData(generateMockGraphData(repository))
+      const mockData = generateMockGraphData(repository)
+      setGraphData(mockData)
     } finally {
       setLoading(false)
     }
@@ -359,7 +387,7 @@ function ContributorGraph({ repository = 'RooCodeInc/Roo-Code' }) {
                 <div className="w-8 h-8 border-2 border-[#D8D3CC] border-t-black rounded-full animate-spin"></div>
               </div>
             ) : (
-              getContributorsList().slice(0, 8).map((contributor, idx) => (
+              getContributorsList().map((contributor, idx) => (
                 <div
                   key={idx}
                   className="px-6 py-4 hover:bg-[#FAFAF8] transition-colors cursor-pointer"
@@ -516,6 +544,101 @@ function ContributorGraph({ repository = 'RooCodeInc/Roo-Code' }) {
       )}
     </div>
   )
+}
+
+// Convert real contributor data to graph format
+function convertToGraphData(contributors, repo) {
+  const [org, repoName] = repo.split('/')
+
+  // Determine maintainers (top 5 contributors) vs regular contributors
+  const sortedContributors = [...contributors].sort((a, b) => b.contributions - a.contributions)
+  const maintainerThreshold = sortedContributors[4]?.contributions || 100
+
+  // Network view data
+  const nodes = [
+    { id: 'repo', name: repoName, type: 'repo' }
+  ]
+
+  const links = []
+
+  // Add all contributors as nodes
+  contributors.forEach((contributor, idx) => {
+    const isMaintainer = contributor.contributions >= maintainerThreshold && idx < 10
+    nodes.push({
+      id: `user${idx}`,
+      name: contributor.login,
+      type: isMaintainer ? 'maintainer' : 'contributor',
+      contributions: contributor.contributions,
+      email: `${contributor.login}@users.noreply.github.com`,
+      expertise: ['Code Contributor'],
+      url: contributor.url
+    })
+
+    // Add link from contributor to repo
+    links.push({
+      source: `user${idx}`,
+      target: 'repo',
+      value: Math.min(contributor.contributions / 10, 20) // Scale for visualization
+    })
+  })
+
+  // Add some connections between top contributors for network view
+  for (let i = 0; i < Math.min(10, contributors.length); i++) {
+    for (let j = i + 1; j < Math.min(10, contributors.length); j++) {
+      if (Math.random() > 0.7) { // 30% chance of connection
+        links.push({
+          source: `user${i}`,
+          target: `user${j}`,
+          value: 1
+        })
+      }
+    }
+  }
+
+  // Hierarchy view data - group by contribution level
+  const topContributors = sortedContributors.slice(0, 5)
+  const midContributors = sortedContributors.slice(5, 15)
+  const otherContributors = sortedContributors.slice(15)
+
+  const hierarchy = {
+    name: repoName,
+    type: 'repo',
+    contributions: 0,
+    children: []
+  }
+
+  // Add top contributors as main branches
+  topContributors.forEach((contributor, idx) => {
+    const branch = {
+      name: contributor.login,
+      type: 'maintainer',
+      contributions: contributor.contributions,
+      email: `${contributor.login}@users.noreply.github.com`,
+      expertise: ['Core Contributor'],
+      url: contributor.url,
+      children: []
+    }
+
+    // Add 2-3 mid-level contributors under each top contributor
+    const startIdx = idx * 2
+    const endIdx = Math.min(startIdx + 3, midContributors.length)
+    for (let i = startIdx; i < endIdx; i++) {
+      if (midContributors[i]) {
+        branch.children.push({
+          name: midContributors[i].login,
+          type: 'contributor',
+          contributions: midContributors[i].contributions,
+          email: `${midContributors[i].login}@users.noreply.github.com`,
+          expertise: ['Contributor'],
+          url: midContributors[i].url
+        })
+      }
+    }
+
+    hierarchy.children.push(branch)
+  })
+
+  return { nodes, links, hierarchy }
 }
 
 // Generate mock graph data for demonstration

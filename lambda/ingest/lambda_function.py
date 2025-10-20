@@ -40,35 +40,105 @@ def get_github_token() -> str:
         return os.environ.get('GITHUB_TOKEN', '')
 
 
-def github_request(url: str, token: str, params: Optional[Dict] = None) -> Dict:
-    """Make authenticated GitHub API request with rate limit handling"""
+def parse_next_link(link_header: str) -> Optional[str]:
+    """
+    Parse GitHub Link header to find next page URL
+    Example: '<https://api.github.com/repos/...?page=2>; rel="next"'
+    """
+    if not link_header:
+        return None
+    
+    links = link_header.split(',')
+    for link in links:
+        if 'rel="next"' in link:
+            # Extract URL between < and >
+            start = link.find('<')
+            end = link.find('>')
+            if start != -1 and end != -1:
+                return link[start + 1:end]
+    
+    return None
+
+
+def github_request(url: str, token: str, params: Optional[Dict] = None, paginate: bool = False) -> Any:
+    """Make authenticated GitHub API request with rate limit handling and optional pagination"""
     headers = {
         'Authorization': f'token {token}',
         'Accept': 'application/vnd.github.v3+json'
     }
     
-    max_retries = 3
-    for attempt in range(max_retries):
-        response = requests.get(url, headers=headers, params=params)
-        
-        if response.status_code == 200:
-            return response.json()
-        elif response.status_code == 403 and 'rate limit' in response.text.lower():
-            reset_time = int(response.headers.get('X-RateLimit-Reset', 0))
-            wait_time = max(reset_time - int(time.time()), 60)
-            print(f"Rate limited. Waiting {wait_time} seconds...")
-            time.sleep(wait_time)
-        elif response.status_code == 404:
-            print(f"Resource not found: {url}")
-            return {}
-        else:
-            print(f"GitHub API error: {response.status_code} - {response.text}")
-            if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)
+    # If pagination is not requested, use original single-request logic
+    if not paginate:
+        max_retries = 3
+        for attempt in range(max_retries):
+            response = requests.get(url, headers=headers, params=params)
+            
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 403 and 'rate limit' in response.text.lower():
+                reset_time = int(response.headers.get('X-RateLimit-Reset', 0))
+                wait_time = max(reset_time - int(time.time()), 60)
+                print(f"Rate limited. Waiting {wait_time} seconds...")
+                time.sleep(wait_time)
+            elif response.status_code == 404:
+                print(f"Resource not found: {url}")
+                return {}
             else:
-                raise Exception(f"GitHub API request failed: {response.status_code}")
+                print(f"GitHub API error: {response.status_code} - {response.text}")
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                else:
+                    raise Exception(f"GitHub API request failed: {response.status_code}")
+        
+        return {}
     
-    return {}
+    # Pagination logic for fetching all pages
+    all_results = []
+    current_url = url
+    page_count = 0
+    max_retries = 3
+    
+    while current_url:
+        page_count += 1
+        print(f"  Fetching page {page_count}...")
+        
+        for attempt in range(max_retries):
+            response = requests.get(current_url, headers=headers, params=params if page_count == 1 else None)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if isinstance(data, list):
+                    all_results.extend(data)
+                else:
+                    all_results.append(data)
+                
+                # Check for next page in Link header
+                link_header = response.headers.get('Link', '')
+                current_url = parse_next_link(link_header)
+                
+                # Rate limiting between pages
+                if current_url:
+                    time.sleep(0.5)
+                
+                break  # Success, exit retry loop
+                
+            elif response.status_code == 403 and 'rate limit' in response.text.lower():
+                reset_time = int(response.headers.get('X-RateLimit-Reset', 0))
+                wait_time = max(reset_time - int(time.time()), 60)
+                print(f"Rate limited. Waiting {wait_time} seconds...")
+                time.sleep(wait_time)
+            elif response.status_code == 404:
+                print(f"Resource not found: {current_url}")
+                return all_results
+            else:
+                print(f"GitHub API error: {response.status_code} - {response.text}")
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                else:
+                    print(f"Failed to fetch page {page_count} after {max_retries} attempts")
+                    return all_results
+    
+    return all_results
 
 
 def save_to_s3(data: Any, key: str) -> None:
@@ -127,6 +197,8 @@ def ingest_repository(org: str, repo: str, token: str, cursor: str) -> Dict:
     repo_id = f"repo#{org}/{repo}"
     stats = {
         'contributors': 0,
+        'contributors_total': 0,
+        'bots_skipped': 0,
         'issues': 0,
         'prs': 0,
         'users': 0,
@@ -162,15 +234,41 @@ def ingest_repository(org: str, repo: str, token: str, cursor: str) -> Dict:
     # Save raw repo data to S3
     save_to_s3(repo_data, f"github/{org}/{repo}/repo/{date_path}/repo.json")
     
-    # 1. FETCH CONTRIBUTORS (MOST IMPORTANT FOR GRAPH)
-    print(f"Fetching contributors for {org}/{repo}...")
+    # 1. FETCH ALL CONTRIBUTORS (MOST IMPORTANT FOR GRAPH)
+    print(f"Fetching ALL contributors for {org}/{repo} (this may take a while)...")
     contributors_url = f"https://api.github.com/repos/{org}/{repo}/contributors"
-    contributors = github_request(contributors_url, token, {'per_page': 100})
+    contributors = github_request(contributors_url, token, {'per_page': 100}, paginate=True)
     
     if isinstance(contributors, list):
-        for contributor in contributors[:50]:  # Top 50 contributors
+        stats['contributors_total'] = len(contributors)
+        print(f"Found {stats['contributors_total']} total contributors")
+        
+        # Safety limits
+        MAX_CONTRIBUTORS = 1000
+        CONTRIBUTOR_TIMEOUT = 300  # 5 minutes
+        start_time = time.time()
+        
+        for contributor in contributors:
+            # Check timeout
+            if time.time() - start_time > CONTRIBUTOR_TIMEOUT:
+                print(f"⚠️ Contributor processing timeout after {stats['contributors']} contributors")
+                stats['errors'].append(f"Timeout after {stats['contributors']} contributors")
+                break
+            
+            # Check max limit
+            if stats['contributors'] >= MAX_CONTRIBUTORS:
+                print(f"⚠️ Reached max contributor limit ({MAX_CONTRIBUTORS})")
+                stats['errors'].append(f"Max contributor limit reached")
+                break
+            
             user_login = contributor.get('login')
-            if not user_login or contributor.get('type') != 'User':
+            
+            # Skip bots and invalid users
+            if not user_login:
+                continue
+            
+            if contributor.get('type') != 'User':
+                stats['bots_skipped'] += 1
                 continue
                 
             user_id = f"user#{user_login}"
@@ -198,8 +296,16 @@ def ingest_repository(org: str, repo: str, token: str, cursor: str) -> Dict:
             )
             
             stats['contributors'] += 1
+            
+            # Progress logging every 50 contributors
+            if stats['contributors'] % 50 == 0:
+                print(f"  Processed {stats['contributors']}/{stats['contributors_total']} contributors...")
+            
+            # Rate limiting every 10 contributors
+            if stats['contributors'] % 10 == 0:
+                time.sleep(0.3)
         
-        print(f"Ingested {stats['contributors']} contributors")
+        print(f"Ingested {stats['contributors']} contributors ({stats['bots_skipped']} bots skipped)")
     
     # 2. FETCH PULL REQUESTS
     print(f"Fetching pull requests for {org}/{repo}...")
@@ -380,7 +486,7 @@ def ingest_repository(org: str, repo: str, token: str, cursor: str) -> Dict:
             save_to_s3(issue, f"github/{org}/{repo}/issues/{date_path}/issue-{issue_number}.json")
     
     print(f"Ingestion complete for {org}/{repo}:")
-    print(f"  - {stats['contributors']} contributors")
+    print(f"  - {stats['contributors']}/{stats['contributors_total']} contributors processed ({stats['bots_skipped']} bots skipped)")
     print(f"  - {stats['prs']} pull requests")
     print(f"  - {stats['issues']} issues")
     print(f"  - {stats['files']} files")
