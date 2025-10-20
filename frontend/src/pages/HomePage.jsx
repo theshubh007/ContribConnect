@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import './HomePage.css'
 
 const API_URL = 'https://n46ncnxcm8.execute-api.us-east-1.amazonaws.com'
 
@@ -76,81 +75,109 @@ function HomePage() {
   }
 
   return (
-    <div className="home-page">
-      {/* Hero Section */}
-      <header className="hero">
-        <div className="hero-content">
-          <h1>🤝 ContribConnect</h1>
-          <p className="hero-subtitle">Discover open source projects and connect with expert contributors</p>
-
-          {/* Search Bar */}
-          <div className="search-container">
-            <div className="search-box">
-              <span className="search-icon">🔍</span>
+    <div className="min-h-screen bg-[#F5F1ED]">
+      {/* Header */}
+      <header className="border-b border-[#D8D3CC] bg-[#F5F1ED] sticky top-0 z-50">
+        <div className="max-w-[1400px] mx-auto px-8 py-5 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-7 h-7 bg-black rounded-sm flex items-center justify-center">
+              <span className="text-white font-bold text-xs">CC</span>
+            </div>
+            <span className="font-semibold text-[15px] tracking-tight">ContribConnect</span>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="relative">
               <input
                 type="text"
-                placeholder="Search repositories by name, language, or topic..."
+                placeholder="Search..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="search-input"
+                className="w-[280px] px-4 py-2 pr-10 border border-[#D8D3CC] rounded-md bg-white text-[13px] placeholder-[#999] focus:outline-none focus:border-[#FF5722]"
               />
-              {searchQuery && (
+              {searchQuery ? (
                 <button
-                  className="clear-search"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#999] hover:text-[#333]"
                   onClick={() => setSearchQuery('')}
                 >
                   ✕
                 </button>
+              ) : (
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[#999] text-[11px] font-mono">⌘K</span>
               )}
             </div>
-          </div>
-
-          {/* Stats */}
-          <div className="hero-stats">
-            <div className="stat">
-              <span className="stat-value">{repositories.length}</span>
-              <span className="stat-label">Repositories</span>
-            </div>
-            <div className="stat">
-              <span className="stat-value">{repositories.reduce((sum, r) => sum + (r.stars || 0), 0).toLocaleString()}</span>
-              <span className="stat-label">Total Stars</span>
-            </div>
-            <div className="stat">
-              <span className="stat-value">{new Set(repositories.map(r => r.language)).size}</span>
-              <span className="stat-label">Languages</span>
-            </div>
+            <button 
+              className="bg-[#FF5722] hover:bg-[#E64A19] text-white px-5 py-2 rounded-md text-[13px] font-medium"
+              onClick={handleOnboardClick}
+            >
+              Add Repository
+            </button>
           </div>
         </div>
       </header>
 
+      {/* Hero Section */}
+      <section className="max-w-[1400px] mx-auto px-8 pt-16 pb-12">
+        <div className="max-w-[720px]">
+          <h1 className="text-[48px] leading-[1.1] font-bold mb-6 tracking-[-0.02em]">
+            Find the right contributors<br />
+            for your open source project.
+          </h1>
+          <p className="text-[16px] leading-[1.7] text-[#666] mb-8 max-w-[560px]">
+            Discover expert maintainers and contributors. Get insights on who to ask for code reviews, 
+            technical guidance, and collaboration opportunities.
+          </p>
+          
+          {/* Stats */}
+          <div className="flex gap-12">
+            <div>
+              <div className="text-[28px] font-bold leading-none mb-1.5">{repositories.length}</div>
+              <div className="text-[12px] text-[#888] uppercase tracking-wide">Repositories</div>
+            </div>
+            <div>
+              <div className="text-[28px] font-bold leading-none mb-1.5">{repositories.reduce((sum, r) => sum + (r.stars || 0), 0).toLocaleString()}</div>
+              <div className="text-[12px] text-[#888] uppercase tracking-wide">Total Stars</div>
+            </div>
+            <div>
+              <div className="text-[28px] font-bold leading-none mb-1.5">{new Set(repositories.map(r => r.language)).size}</div>
+              <div className="text-[12px] text-[#888] uppercase tracking-wide">Languages</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Main Content */}
-      <main className="main-content">
-        <div className="content-header">
-          <h2>
-            {searchQuery ? `Search Results (${filteredRepos.length})` : 'Featured Repositories'}
-          </h2>
-          <button className="onboard-btn" onClick={handleOnboardClick}>
-            ➕ Onboard Your Repository
-          </button>
+      <main className="max-w-[1400px] mx-auto px-8 pb-24">
+        <div className="flex justify-between items-baseline mb-6">
+          <div>
+            <h2 className="text-[20px] font-semibold mb-1">
+              {searchQuery ? 'Search Results' : 'Repositories'}
+            </h2>
+            <p className="text-[13px] text-[#888]">
+              {searchQuery ? `${filteredRepos.length} results found` : `Browse ${filteredRepos.length} indexed repositories`}
+            </p>
+          </div>
         </div>
 
         {/* Repository Grid */}
         {loading ? (
-          <div className="loading-state">
-            <div className="spinner"></div>
-            <p>Loading repositories...</p>
+          <div className="flex flex-col items-center justify-center py-32">
+            <div className="w-9 h-9 border-2 border-[#D8D3CC] border-t-black rounded-full animate-spin mb-4"></div>
+            <p className="text-[#888] text-[13px]">Loading repositories...</p>
           </div>
         ) : filteredRepos.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon">🔍</div>
-            <h3>No repositories found</h3>
-            <p>Try a different search term or onboard a new repository</p>
-            <button className="onboard-btn-large" onClick={handleOnboardClick}>
-              ➕ Onboard Your Repository
+          <div className="text-center py-32">
+            <div className="text-5xl mb-5">🔍</div>
+            <h3 className="text-[22px] font-semibold mb-2">No repositories found</h3>
+            <p className="text-[#888] text-[14px] mb-7">Try a different search term or add a new repository</p>
+            <button 
+              className="bg-[#FF5722] hover:bg-[#E64A19] text-white px-6 py-3 rounded-md text-[13px] font-medium"
+              onClick={handleOnboardClick}
+            >
+              Add Repository
             </button>
           </div>
         ) : (
-          <div className="repo-grid">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredRepos.map((repo, index) => (
               <RepoCard
                 key={index}
@@ -175,34 +202,54 @@ function HomePage() {
 
 function RepoCard({ repo, onClick }) {
   return (
-    <div className="repo-card" onClick={onClick}>
-      <div className="repo-header">
-        <h3 className="repo-name">{repo.full_name}</h3>
-        <div className="repo-stars">
-          ⭐ {repo.stars.toLocaleString()}
-        </div>
-      </div>
-
-      <p className="repo-description">{repo.description}</p>
-
-      <div className="repo-footer">
-        <div className="repo-language">
-          <span className="language-dot" style={{ backgroundColor: getLanguageColor(repo.language) }}></span>
-          {repo.language}
-        </div>
-
-        {repo.topics && repo.topics.length > 0 && (
-          <div className="repo-topics">
-            {repo.topics.slice(0, 3).map((topic, i) => (
-              <span key={i} className="topic-tag">{topic}</span>
-            ))}
+    <div 
+      className="bg-white border border-[#D8D3CC] rounded-lg p-6 cursor-pointer hover:border-[#B8B3AC] hover:shadow-sm group transition-all"
+      onClick={onClick}
+    >
+      {/* Repo name */}
+      <div className="flex items-start justify-between mb-3">
+        <h3 className="font-semibold text-[16px] leading-tight group-hover:text-[#FF5722] flex-1 pr-2">
+          {repo.full_name}
+        </h3>
+        {repo.status && (
+          <div className={`text-[10px] px-2 py-1 rounded font-medium flex-shrink-0 ${
+            repo.status === 'success' 
+              ? 'bg-[#E8F5E9] text-[#2E7D32]' 
+              : 'bg-[#FFF3E0] text-[#E65100]'
+          }`}>
+            {repo.status === 'success' ? '✓' : '⏳'}
           </div>
         )}
       </div>
 
-      {repo.status && (
-        <div className={`repo-status ${repo.status}`}>
-          {repo.status === 'success' ? '✓ Ready' : '⏳ Processing'}
+      {/* Description */}
+      <p className="text-[13px] text-[#666] leading-[1.6] mb-5 line-clamp-2 min-h-[2.6rem]">
+        {repo.description}
+      </p>
+
+      {/* Meta info */}
+      <div className="flex items-center gap-4 text-[12px] text-[#888] mb-3">
+        <div className="flex items-center gap-1.5">
+          <span 
+            className="w-2.5 h-2.5 rounded-full" 
+            style={{ backgroundColor: getLanguageColor(repo.language) }}
+          ></span>
+          <span>{repo.language}</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[#FFB300]">★</span>
+          <span className="font-medium">{repo.stars.toLocaleString()}</span>
+        </div>
+      </div>
+
+      {/* Topics */}
+      {repo.topics && repo.topics.length > 0 && (
+        <div className="flex gap-1.5 flex-wrap">
+          {repo.topics.slice(0, 3).map((topic, i) => (
+            <span key={i} className="text-[11px] px-2.5 py-1 bg-[#E8E4DF] text-[#555] rounded-full">
+              {topic}
+            </span>
+          ))}
         </div>
       )}
     </div>
@@ -282,23 +329,30 @@ function OnboardModal({ onClose, onSuccess }) {
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>🚀 Onboard Your Repository</h2>
-          <button className="modal-close" onClick={onClose}>✕</button>
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-5" onClick={onClose}>
+      <div className="bg-[#F5F1ED] border border-[#D8D3CC] rounded-lg max-w-[520px] w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-center px-7 py-6 border-b border-[#D8D3CC]">
+          <h2 className="text-[17px] font-semibold">Add Repository</h2>
+          <button 
+            className="w-7 h-7 rounded-sm hover:bg-[#E8E4DF] flex items-center justify-center text-[#888] hover:text-black text-lg"
+            onClick={onClose}
+          >
+            ✕
+          </button>
         </div>
 
         {success ? (
-          <div className="success-message">
-            <div className="success-icon">✓</div>
-            <h3>Repository Onboarded!</h3>
-            <p>Your repository is being processed and will appear in the list shortly.</p>
+          <div className="px-7 py-12 text-center">
+            <div className="w-16 h-16 bg-[#E8F5E9] text-[#2E7D32] border border-[#A5D6A7] rounded-lg flex items-center justify-center text-3xl mx-auto mb-5">
+              ✓
+            </div>
+            <h3 className="text-[17px] font-semibold mb-2">Repository Added!</h3>
+            <p className="text-[13px] text-[#666] leading-relaxed">Your repository is being processed and will appear in the list shortly.</p>
           </div>
         ) : (
-          <form onSubmit={handleSubmit}>
-            <div className="form-group">
-              <label>GitHub Repository URL</label>
+          <form onSubmit={handleSubmit} className="px-7 py-6">
+            <div className="mb-6">
+              <label className="block mb-2.5 text-[13px] font-medium">GitHub Repository URL</label>
               <input
                 type="text"
                 placeholder="https://github.com/owner/repository"
@@ -306,22 +360,32 @@ function OnboardModal({ onClose, onSuccess }) {
                 onChange={(e) => setRepoUrl(e.target.value)}
                 required
                 disabled={loading}
+                className="w-full px-4 py-3 border border-[#D8D3CC] rounded-md bg-white text-[14px] placeholder-[#999] focus:outline-none focus:border-[#FF5722] disabled:bg-[#E8E4DF] disabled:text-[#888]"
               />
-              <small>Enter the full GitHub URL of your open source repository</small>
+              <small className="block mt-2 text-[12px] text-[#888] leading-relaxed">Enter the full GitHub URL of your open source repository</small>
             </div>
 
             {error && (
-              <div className="error-message">
-                ⚠️ {error}
+              <div className="bg-[#FFEBEE] border border-[#FFCDD2] text-[#C62828] px-4 py-3 rounded-md text-[13px] mb-5 leading-relaxed">
+                {error}
               </div>
             )}
 
-            <div className="modal-actions">
-              <button type="button" onClick={onClose} disabled={loading}>
+            <div className="flex gap-3 justify-end">
+              <button 
+                type="button" 
+                onClick={onClose} 
+                disabled={loading}
+                className="px-5 py-2.5 bg-white border border-[#D8D3CC] text-[#333] rounded-md text-[13px] font-medium hover:bg-[#E8E4DF] disabled:opacity-50"
+              >
                 Cancel
               </button>
-              <button type="submit" className="primary" disabled={loading}>
-                {loading ? 'Processing...' : 'Onboard Repository'}
+              <button 
+                type="submit" 
+                disabled={loading}
+                className="px-5 py-2.5 bg-[#FF5722] hover:bg-[#E64A19] text-white rounded-md text-[13px] font-medium disabled:opacity-50"
+              >
+                {loading ? 'Processing...' : 'Add Repository'}
               </button>
             </div>
           </form>

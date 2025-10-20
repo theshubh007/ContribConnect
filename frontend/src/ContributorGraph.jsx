@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import * as d3 from 'd3'
-import './ContributorGraph.css'
 
 const API_URL = 'https://n46ncnxcm8.execute-api.us-east-1.amazonaws.com/api/agent/chat'
 
@@ -246,91 +245,133 @@ function ContributorGraph({ repository = 'RooCodeInc/Roo-Code' }) {
     }
   }
 
+  // Get sorted contributors list
+  const getContributorsList = () => {
+    if (!graphData?.nodes) return []
+    return graphData.nodes
+      .filter(node => node.type !== 'repo')
+      .sort((a, b) => (b.contributions || 0) - (a.contributions || 0))
+  }
+
   return (
-    <div className="contributor-graph">
-      {/* Stats Banner */}
-      <div className="stats-banner">
-        <div className="stats-greeting">
-          <h2>👋 Hi there,</h2>
-          <p>Here's all you need to know about the {repository.split('/')[1]} team.</p>
+    <div className="space-y-6">
+      {/* Stats Cards */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-white border border-[#D8D3CC] rounded-lg px-5 py-4">
+          <div className="text-[11px] text-[#888] mb-1.5 uppercase tracking-wide">Contributors</div>
+          <div className="text-[28px] font-bold leading-none">{graphData?.nodes?.filter(n => n.type !== 'repo').length || 0}</div>
         </div>
-        <div className="stats-cards">
-          <div className="stat-card">
-            <div className="stat-icon">📊</div>
-            <div className="stat-value">{stats.repos}</div>
-            <div className="stat-label">Repositories</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-icon">👥</div>
-            <div className="stat-value">{graphData?.nodes?.length || 0}</div>
-            <div className="stat-label">Contributors</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-icon">🔄</div>
-            <div className="stat-value">{graphData?.links?.length || 0}</div>
-            <div className="stat-label">Connections</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-icon">📅</div>
-            <div className="stat-value">{stats.date || 'May 4, 2025'}</div>
-            <div className="stat-label">Last Updated</div>
-          </div>
+        <div className="bg-white border border-[#D8D3CC] rounded-lg px-5 py-4">
+          <div className="text-[11px] text-[#888] mb-1.5 uppercase tracking-wide">Maintainers</div>
+          <div className="text-[28px] font-bold leading-none">{graphData?.nodes?.filter(n => n.type === 'maintainer').length || 0}</div>
+        </div>
+        <div className="bg-white border border-[#D8D3CC] rounded-lg px-5 py-4">
+          <div className="text-[11px] text-[#888] mb-1.5 uppercase tracking-wide">Last Updated</div>
+          <div className="text-[13px] font-semibold">{stats.date || 'May 4, 2025'}</div>
         </div>
       </div>
 
-      {/* Graph Controls */}
-      <div className="graph-controls">
-        <div className="graph-header">
-          <h3>🌐 Organization Network</h3>
-          <div className="view-controls">
-            <button
-              className={viewMode === 'hierarchy' ? 'active' : ''}
-              onClick={() => setViewMode('hierarchy')}
-            >
-              📊 Hierarchy
-            </button>
-            <button
-              className={viewMode === 'network' ? 'active' : ''}
-              onClick={() => setViewMode('network')}
-            >
-              🕸️ Network
-            </button>
-            <button onClick={fetchGraphData} disabled={loading}>
-              {loading ? '⏳' : '🔄'} Refresh
-            </button>
-          </div>
+      {/* Contributors List */}
+      <div className="bg-white border border-[#D8D3CC] rounded-lg overflow-hidden">
+        <div className="px-6 py-5 border-b border-[#D8D3CC]">
+          <h3 className="text-[15px] font-semibold">Top Contributors</h3>
+          <p className="text-[12px] text-[#888] mt-1">Key people who contribute to this repository</p>
         </div>
-
-        <div className="graph-legend">
-          <div className="legend-title">Legend</div>
-          <div className="legend-items">
-            <div className="legend-item">
-              <span className="legend-dot repo"></span>
-              <span>Repository</span>
+        <div className="divide-y divide-[#E8E4DF]">
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="w-8 h-8 border-2 border-[#D8D3CC] border-t-black rounded-full animate-spin"></div>
             </div>
-            <div className="legend-item">
-              <span className="legend-dot maintainer"></span>
-              <span>Maintainer</span>
-            </div>
-            <div className="legend-item">
-              <span className="legend-dot contributor"></span>
-              <span>Contributor</span>
-            </div>
-          </div>
+          ) : (
+            getContributorsList().slice(0, 8).map((contributor, idx) => (
+              <div key={idx} className="px-6 py-4 hover:bg-[#FAFAF8] transition-colors">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-[13px] ${
+                      contributor.type === 'maintainer' ? 'bg-[#f59e0b]' : 'bg-[#10b981]'
+                    }`}>
+                      {contributor.name.substring(0, 2).toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="font-medium text-[14px]">{contributor.name}</div>
+                      <div className="text-[12px] text-[#888] capitalize">{contributor.type}</div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-semibold text-[14px]">{contributor.contributions}</div>
+                    <div className="text-[11px] text-[#888]">contributions</div>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
-      {/* Graph Visualization */}
-      {loading ? (
-        <div className="graph-loading">
-          <div className="spinner"></div>
-          <p>Loading contributor network...</p>
+      {/* Network Visualization */}
+      <div className="bg-white border border-[#D8D3CC] rounded-lg overflow-hidden">
+        <div className="px-6 py-5 border-b border-[#D8D3CC]">
+          <div className="flex justify-between items-center mb-4">
+            <div>
+              <h3 className="text-[15px] font-semibold">Network Visualization</h3>
+              <p className="text-[12px] text-[#888] mt-1">Explore contributor relationships</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                className={`px-4 py-2 rounded-md text-[12px] font-medium transition-colors ${
+                  viewMode === 'hierarchy' 
+                    ? 'bg-black text-white' 
+                    : 'bg-[#F5F1ED] text-[#333] hover:bg-[#E8E4DF]'
+                }`}
+                onClick={() => setViewMode('hierarchy')}
+              >
+                Hierarchy
+              </button>
+              <button
+                className={`px-4 py-2 rounded-md text-[12px] font-medium transition-colors ${
+                  viewMode === 'network' 
+                    ? 'bg-black text-white' 
+                    : 'bg-[#F5F1ED] text-[#333] hover:bg-[#E8E4DF]'
+                }`}
+                onClick={() => setViewMode('network')}
+              >
+                Network
+              </button>
+            </div>
+          </div>
+
+          {/* Legend */}
+          <div className="flex items-center gap-5 text-[12px]">
+            <span className="text-[#888] font-medium">Legend:</span>
+            <div className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full bg-[#667eea]"></span>
+              <span className="text-[#555]">Repository</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full bg-[#f59e0b]"></span>
+              <span className="text-[#555]">Maintainer</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full bg-[#10b981]"></span>
+              <span className="text-[#555]">Contributor</span>
+            </div>
+          </div>
         </div>
-      ) : (
-        <div className="graph-container">
-          <svg ref={svgRef}></svg>
-        </div>
-      )}
+
+        {loading ? (
+          <div className="flex flex-col items-center justify-center h-[450px] bg-[#FAFAF8]">
+            <div className="w-9 h-9 border-2 border-[#D8D3CC] border-t-black rounded-full animate-spin mb-4"></div>
+            <p className="text-[13px] text-[#888]">Loading network...</p>
+          </div>
+        ) : (
+          <div className="p-8 bg-[#FAFAF8]">
+            <svg 
+              ref={svgRef}
+              className="w-full h-[450px] bg-white rounded-lg border border-[#D8D3CC]"
+            ></svg>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

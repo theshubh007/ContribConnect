@@ -1,7 +1,6 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import HomePage from './pages/HomePage'
 import RepoDetailPage from './pages/RepoDetailPage'
-import './App.css'
 
 function App() {
   return (
