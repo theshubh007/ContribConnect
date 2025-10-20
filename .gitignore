@@ -1,0 +1,72 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Lambda deployment packages
+lambda/*/boto3/
+lambda/*/botocore/
+lambda/*/s3transfer/
+lambda/*/urllib3/
+lambda/*/requests/
+lambda/*/certifi/
+lambda/*/charset_normalizer/
+lambda/*/idna/
+lambda/*/jmespath/
+lambda/*/python_dateutil/
+lambda/*/six.py
+lambda/*/dateutil/
+lambda/*/*.dist-info/
+lambda/*/bin/
+
+# Keep only lambda_function.py and requirements.txt
+lambda/*/package/
+lambda/ingest/package.zip
+lambda/graph-tool/package.zip
+lambda/agent-proxy/package.zip
+
+# AWS
+*.zip
+response.json
+
+# Environment variables
+.env
+.env.local
+*.pem
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
+
+# Node (for frontend)
+node_modules/
+dist/
+build/
+
+# Kiro
+.kiro/cache/

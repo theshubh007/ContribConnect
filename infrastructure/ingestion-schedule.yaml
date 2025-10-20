@@ -1,0 +1,51 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'EventBridge Schedule for Daily Ingestion'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+    Description: Environment name
+
+  ScheduleExpression:
+    Type: String
+    Default: 'cron(0 2 * * ? *)'
+    Description: Schedule expression (default: daily at 2 AM UTC)
+
+Resources:
+  # EventBridge Rule for Daily Ingestion
+  IngestionScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub 'cc-daily-ingestion-${Environment}'
+      Description: Trigger ingestion Lambda daily to refresh contributor data
+      ScheduleExpression: !Ref ScheduleExpression
+      State: ENABLED
+      Targets:
+        - Arn: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:cc-ingest-${Environment}'
+          Id: IngestionLambdaTarget
+
+  # Permission for EventBridge to invoke Lambda
+  IngestionLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Sub 'cc-ingest-${Environment}'
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt IngestionScheduleRule.Arn
+
+Outputs:
+  ScheduleRuleName:
+    Description: Name of the EventBridge rule
+    Value: !Ref IngestionScheduleRule
+    Export:
+      Name: !Sub '${AWS::StackName}-ScheduleRuleName'
+
+  ScheduleExpression:
+    Description: Schedule expression
+    Value: !Ref ScheduleExpression
+    Export:
+      Name: !Sub '${AWS::StackName}-ScheduleExpression'
