@@ -395,10 +395,13 @@ def lambda_handler(event, context):
     # Get GitHub token
     token = get_github_token()
     if not token:
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'error': 'GitHub token not configured'})
-        }
+        print("Warning: No GitHub token found, using environment variable")
+        token = os.environ.get('GITHUB_TOKEN', '')
+        if not token:
+            return {
+                'statusCode': 500,
+                'body': json.dumps({'error': 'GitHub token not configured'})
+            }
     
     # Get enabled repositories
     try:
@@ -409,17 +412,38 @@ def lambda_handler(event, context):
         repos = response.get('Items', [])
     except Exception as e:
         print(f"Error fetching repos: {e}")
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'error': f'Failed to fetch repos: {str(e)}'})
-        }
+        # If repos table is empty or doesn't exist, use default repo
+        repos = [{
+            'org': 'RooCodeInc',
+            'repo': 'Roo-Code',
+            'enabled': True
+        }]
+        print("Using default repository: RooCodeInc/Roo-Code")
     
     if not repos:
-        print("No enabled repositories found")
-        return {
-            'statusCode': 200,
-            'body': json.dumps({'message': 'No repositories to ingest'})
-        }
+        print("No enabled repositories found, adding default")
+        # Add default repository
+        try:
+            repos_table.put_item(
+                Item={
+                    'org': 'RooCodeInc',
+                    'repo': 'Roo-Code',
+                    'enabled': True,
+                    'description': 'AI-powered code assistant for developers',
+                    'language': 'TypeScript',
+                    'stars': 1234,
+                    'topics': ['ai', 'code-assistant', 'vscode', 'typescript'],
+                    'ingestStatus': 'pending',
+                    'createdAt': datetime.now(timezone.utc).isoformat()
+                }
+            )
+            repos = [{'org': 'RooCodeInc', 'repo': 'Roo-Code', 'enabled': True}]
+        except Exception as e:
+            print(f"Error adding default repo: {e}")
+            return {
+                'statusCode': 200,
+                'body': json.dumps({'message': 'No repositories to ingest and could not add default'})
+            }
     
     # Ingest each repository
     results = []
@@ -432,14 +456,17 @@ def lambda_handler(event, context):
             stats = ingest_repository(org, repo, token, cursor)
             
             # Update cursor
-            repos_table.update_item(
-                Key={'org': org, 'repo': repo},
-                UpdateExpression='SET lastIngestAt = :now, ingestStatus = :status',
-                ExpressionAttributeValues={
-                    ':now': datetime.now(timezone.utc).isoformat(),
-                    ':status': 'success'
-                }
-            )
+            try:
+                repos_table.update_item(
+                    Key={'org': org, 'repo': repo},
+                    UpdateExpression='SET lastIngestAt = :now, ingestStatus = :status',
+                    ExpressionAttributeValues={
+                        ':now': datetime.now(timezone.utc).isoformat(),
+                        ':status': 'success'
+                    }
+                )
+            except Exception as update_error:
+                print(f"Error updating repo status: {update_error}")
             
             results.append({
                 'repo': f"{org}/{repo}",
@@ -448,6 +475,20 @@ def lambda_handler(event, context):
             })
         except Exception as e:
             print(f"Error ingesting {org}/{repo}: {e}")
+            # Try to update status to error
+            try:
+                repos_table.update_item(
+                    Key={'org': org, 'repo': repo},
+                    UpdateExpression='SET lastIngestAt = :now, ingestStatus = :status, lastError = :error',
+                    ExpressionAttributeValues={
+                        ':now': datetime.now(timezone.utc).isoformat(),
+                        ':status': 'error',
+                        ':error': str(e)
+                    }
+                )
+            except Exception as update_error:
+                print(f"Error updating repo error status: {update_error}")
+            
             results.append({
                 'repo': f"{org}/{repo}",
                 'status': 'error',
@@ -456,8 +497,15 @@ def lambda_handler(event, context):
     
     return {
         'statusCode': 200,
+        'headers': {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+        },
         'body': json.dumps({
             'message': 'Ingestion complete',
-            'results': results
+            'results': results,
+            'totalProcessed': len(results),
+            'successful': len([r for r in results if r['status'] == 'success']),
+            'failed': len([r for r in results if r['status'] == 'error'])
         })
     }

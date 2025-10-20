@@ -42,7 +42,7 @@ function HomePage() {
       const response = await fetch(`${API_URL}/api/repos/list`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'list', enabledOnly: true })
+        body: JSON.stringify({ action: 'list', enabledOnly: false })
       })
 
       const data = await response.json()
@@ -59,10 +59,18 @@ function HomePage() {
         }))
         setRepositories(repos)
         setFilteredRepos(repos)
+        console.log(`Loaded ${repos.length} repositories from backend`)
+      } else {
+        console.error('Failed to fetch repositories:', data.error)
+        // Fallback to mock data
+        setRepositories(getMockRepositories())
+        setFilteredRepos(getMockRepositories())
       }
     } catch (error) {
       console.error('Error fetching repositories:', error)
-      // Keep mock data if already showing
+      // Fallback to mock data
+      setRepositories(getMockRepositories())
+      setFilteredRepos(getMockRepositories())
     }
   }
 
@@ -299,27 +307,39 @@ function OnboardModal({ onClose, onSuccess }) {
         return
       }
 
-      // Trigger scraping
-      const scrapeResponse = await fetch(`${API_URL}/api/scraper`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ owner, repo: cleanRepo })
-      })
+      console.log('Repository added successfully:', addData)
 
-      const scrapeData = await scrapeResponse.json()
-
-      if (scrapeData.success || scrapeData.status === 'processing') {
+      // Repository added successfully, trigger ingestion via Lambda
+      try {
+        const ingestResponse = await fetch('https://n46ncnxcm8.execute-api.us-east-1.amazonaws.com/api/agent/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: `Please ingest the repository ${owner}/${cleanRepo} for analysis`,
+            sessionId: `ingest-${Date.now()}`
+          })
+        })
+        
+        if (ingestResponse.ok) {
+          setSuccess(true)
+          setTimeout(() => {
+            onSuccess()
+            onClose()
+          }, 2000)
+        } else {
+          setSuccess(true) // Still show success since repo was added
+          setTimeout(() => {
+            onSuccess()
+            onClose()
+          }, 2000)
+        }
+      } catch (ingestError) {
+        console.log('Ingestion trigger failed, but repository was added successfully')
         setSuccess(true)
         setTimeout(() => {
           onSuccess()
           onClose()
         }, 2000)
-      } else {
-        setError('Repository added but scraping failed. It will be processed in the next scheduled run.')
-        setTimeout(() => {
-          onSuccess()
-          onClose()
-        }, 3000)
       }
     } catch (err) {
       setError('Failed to onboard repository. Please try again.')

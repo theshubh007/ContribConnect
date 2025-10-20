@@ -1,1 +1,0 @@
-{"errorMessage": "Syntax error in module 'lambda_function': expected 'except' or 'finally' block (lambda_function.py, line 232)", "errorType": "Runtime.UserCodeSyntaxError", "requestId": "", "stackTrace": ["  File \"/var/task/lambda_function.py\" Line 232\n                upsert_node(\n"]}
